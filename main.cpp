@@ -1,82 +1,65 @@
-#include "SimPFilter.h"
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_fit.h>
-#include <gsl/gsl_randist.h>
+#include <string>
+#include <float.h>
 #include <iostream>
+#include <sstream>
+#include <iterator>
+#include <iostream>
+#include <fstream>
+#include <sstream>
 #include <vector>
-#include "stdio.h"     
-#include "math.h"
-#include <stdlib.h>
+#include <cctype>
+#include "opencv2/cvconfig.h"
+#include "opencv2/imgproc/imgproc_c.h"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/core/core.hpp"
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/video.hpp"
+#include "bsopencv.h"
+#include "particleFilter.h"
+#include "utils.h"
+//#include "descriptor.h"
+#include "adaboost.h"
+static string descriptorVectorFile = "/Users/xinyiguo/SonyCPPGithub/tracker/genfiles/descriptorvector.dat";
 
+int main(int argc, char *argv[]) {
+    particleFilter* spf = new particleFilter;
+    vector<float> descriptorVector = getDescriptorVectorFromFile(descriptorVectorFile);
+    BackgroundSubtractorMOG pMOG = BackgroundSubtractorMOG();
+    HOGDescriptor hog;
+    hog.winSize = Size(24, 48);
+    std::cout << hog.blockSize << endl;
+    hog.blockStride = Size(1,2);
+    hog.setSVMDetector(descriptorVector); // set the hog descriptor
+    VideoCapture capture("/Users/xinyiguo/Desktop/video/mv2_001.avi");
+    Mat frame;
+    int keyboard=0;
+    if(!capture.isOpened()){
+        cerr << "Unable to open video file: "  << endl;
+        exit(EXIT_FAILURE);
+    }
+    int countFrame = 0;
+    while((char)keyboard != 'q' && (char)keyboard != 27){
+        countFrame ++;
+        if(!capture.read(frame)) {
+            cerr << "Unable to read next frame." << endl;
+            cerr << "Exiting..." << endl;
+            exit(EXIT_FAILURE);
+        }
+        Mat bsRes = pMOG.processFrame(frame);
+        vector<Rect> detected;
 
-#define PI 3.14159265
-#define NUM_COMMANDS 3
-using namespace std;
-
-int time_step = 100;
-int nParticles = 100;
-vector<double> trueX;
-vector<double> falseX;
-vector<double> observationY;
-/*double sigmaX = 0.1;
-double sigmaY = 0.1;*/
-
-void generate_ground_truth(){
-	double sigmaY = 0.1;
-	const gsl_rng_type * T;
-  	gsl_rng * r;
-	gsl_rng_env_setup();
-	T = gsl_rng_default;
-	r = gsl_rng_alloc (T);
-	for(int i = 0; i< time_step; i++){
-		double x = 0.5*(sin(2*i*PI/180)+1);
-		trueX.push_back(x);
-		falseX.push_back(-x);
-    	//cout <<  gsl_ran_gaussian(r, sigmaY) << endl;
-		double ober = x * x + 1 * gsl_ran_gaussian(r, sigmaY); 
-		observationY.push_back(ober);
-	}
+        if(countFrame<=3){
+            detected = getDetected(hog, 2.8, bsRes, frame);
+            for(auto p: detected){
+                cout<< p.x << " "<< p.y << endl;
+            }
+        }
+        if(countFrame>=3){
+            detected = getDetected(hog, 2.8, bsRes, frame);
+            spf->process(frame,detected, hog);
+        }
+    }
 }
-
-void display(vector<double> trueX,vector<double> falseX, vector<double> observationY, vector<vector<double> > particleVec)
-{
-    char * commandsForGnuplot[] = {"set title \"TITLEEEEE\"", "plot 'data.temp'", "set yrange [-1:1]"};
-    FILE * temp = fopen("data.temp", "w");
-    FILE * gnuplotPipe = popen ("gnuplot -persistent", "w");
-    fprintf(gnuplotPipe, "plot '-' \n");
-	int i;
-
-	for (int i = 0; i < trueX.size(); i++)
-	{
-	  fprintf(gnuplotPipe, "%lf %lf\n", (double)i, observationY.at(i));
-	  fprintf(gnuplotPipe, "%lf %lf\n", (double)i, trueX.at(i));
-	  fprintf(gnuplotPipe, "%lf %lf\n", (double)i, falseX.at(i));
-	  vector<double> particlePos =particleVec[i];
-	  for(int j=0; j<particlePos.size(); j++)
-	  	 fprintf(gnuplotPipe, "%lf %lf\n", (double)i, particlePos.at(j));
-	}
-	fprintf(gnuplotPipe, "e");
-}
-
-int main() {
-	generate_ground_truth();
-	SimPFilter* spf = new SimPFilter;
-	vector<vector<double> > particleVec;
-	for(int k=0; k <time_step; k++){
-		if(k==0)
-			spf->initParticles(0.0, spf->rng);
-		vector<double> curParticle ;
-        particleVec.push_back(curParticle);
-		spf->transition(spf->rng);
-		spf->updateWeight(observationY.at(k), spf->rng);
-		spf->resample(spf->rng);
-		if(k%5==0){
-			for(int j=0; j<nParticles; j++){
-			particleVec[k].push_back(spf->particles[j].x);
-			}
-		}
-	}
-	display(trueX, falseX, observationY, particleVec);
-}
-
-
